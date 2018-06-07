@@ -81,7 +81,8 @@ public class RecreateInMemoryData {
         Table tableForMaxDuration = aggregationTables.get(incrementalDurations.get(incrementalDurations.size() - 1));
         StoreQuery storeQuery = StoreQuery.query()
                 .from(InputStore.store(tableForMaxDuration.getTableDefinition().getId()))
-                .select(Selector.selector().orderBy(Expression.variable("_TIMESTAMP")));
+                .select(Selector.selector().orderBy(Expression.variable("AGG_TIMESTAMP")));
+        storeQuery.setType(StoreQuery.StoreQueryType.FIND);
         StoreQueryRuntime storeQueryRuntime = StoreQueryParser.parse(storeQuery, siddhiAppContext, tableMap, windowMap,
                 aggregationMap);
 
@@ -100,12 +101,15 @@ public class RecreateInMemoryData {
             Table recreateFromTable = aggregationTables.get(incrementalDurations.get(i - 1));
 
             storeQuery = StoreQuery.query().from(InputStore.store(recreateFromTable.getTableDefinition().getId()))
-                    .select(Selector.selector().orderBy(Expression.variable("_TIMESTAMP")));
+                    .select(Selector.selector().orderBy(Expression.variable("AGG_TIMESTAMP")));
+            storeQuery.setType(StoreQuery.StoreQueryType.FIND);
             storeQueryRuntime = StoreQueryParser.parse(storeQuery, siddhiAppContext, tableMap, windowMap,
                     aggregationMap);
             events = storeQueryRuntime.execute();
 
             if (events != null) {
+                long referenceToNextLatestEvent = (Long) events[events.length - 1].getData(0);
+                String timeZoneOfNextLatestEvent = events[events.length - 1].getData(1).toString();
                 if (latestEventTimestamp != null) {
                     List<Event> eventsNewerThanLatestEventOfRecreateForDuration = new ArrayList<>();
                     for (Event event : events) {
@@ -122,7 +126,7 @@ public class RecreateInMemoryData {
                             new Event[eventsNewerThanLatestEventOfRecreateForDuration.size()]);
                 }
 
-                latestEventTimestamp = (Long) events[events.length - 1].getData(0);
+                latestEventTimestamp = referenceToNextLatestEvent;
 
                 ComplexEventChunk<StreamEvent> complexEventChunk = new ComplexEventChunk<>(false);
                 for (Event event : events) {
@@ -136,7 +140,7 @@ public class RecreateInMemoryData {
                     TimePeriod.Duration rootDuration = incrementalDurations.get(0);
                     IncrementalExecutor rootIncrementalExecutor = incrementalExecutorMap.get(rootDuration);
                     long emitTimeOfLatestEventInTable = IncrementalTimeConverterUtil.getNextEmitTime(
-                            latestEventTimestamp, rootDuration, events[events.length - 1].getData(1).toString());
+                            latestEventTimestamp, rootDuration, timeZoneOfNextLatestEvent);
 
                     rootIncrementalExecutor.setValuesForInMemoryRecreateFromTable(true, emitTimeOfLatestEventInTable);
 

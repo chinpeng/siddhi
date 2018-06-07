@@ -30,6 +30,7 @@ import org.wso2.siddhi.core.exception.CannotRestoreSiddhiAppStateException;
 import org.wso2.siddhi.core.exception.NoPersistenceStoreException;
 import org.wso2.siddhi.core.query.output.callback.QueryCallback;
 import org.wso2.siddhi.core.stream.input.InputHandler;
+import org.wso2.siddhi.core.stream.output.StreamCallback;
 import org.wso2.siddhi.core.util.EventPrinter;
 import org.wso2.siddhi.core.util.SiddhiTestHelper;
 import org.wso2.siddhi.core.util.persistence.InMemoryPersistenceStore;
@@ -124,7 +125,7 @@ public class PersistenceTestCase {
         try {
             siddhiAppRuntime.restoreLastRevision();
         } catch (CannotRestoreSiddhiAppStateException e) {
-            Assert.fail("Restoring of Siddhi app " + siddhiAppRuntime.getName() + " failed");
+            Assert.fail("Restoring of Siddhi app " + siddhiAppRuntime.getName() + " failed", e);
         }
 
         inputHandler.send(new Object[]{"IBM", 75.6f, 100});
@@ -521,6 +522,7 @@ public class PersistenceTestCase {
         try {
             siddhiAppRuntime.restoreLastRevision();
         } catch (CannotRestoreSiddhiAppStateException e) {
+            log.error(e.getMessage(), e);
             Assert.fail("Restoring of Siddhi app " + siddhiAppRuntime.getName() + " failed");
         }
 
@@ -950,4 +952,171 @@ public class PersistenceTestCase {
         siddhiAppRuntime.shutdown();
     }
 
+    @Test(dependsOnMethods = "persistenceTest11")
+    public void persistenceTest12() throws InterruptedException {
+        log.info("persistence test 12 - partition query");
+
+        PersistenceStore persistenceStore = new InMemoryPersistenceStore();
+
+        SiddhiManager siddhiManager = new SiddhiManager();
+        siddhiManager.setPersistenceStore(persistenceStore);
+
+        String siddhiApp = "@App:name('TestPlan1')\n" +
+                "define stream TempStream(deviceID long);\n" +
+                "\n" +
+                "define stream DeviceTempStream (deviceID long, count long);\n" +
+                "\n" +
+                "from TempStream\n" +
+                "select * insert into TempInternalStream;\n" +
+                "\n" +
+                "partition with ( deviceID of TempInternalStream )\n" +
+                "begin\n" +
+                "from TempInternalStream\n" +
+                "select deviceID, count(deviceID) as count\n" +
+                "insert into DeviceTempStream\n" +
+                "end;";
+
+        StreamCallback queryCallback = new StreamCallback() {
+            @Override
+            public void receive(Event[] events) {
+                EventPrinter.print(events);
+                eventArrived = true;
+                count++;
+                lastValue = (Long) events[0].getData(1);
+            }
+        };
+
+        SiddhiAppRuntime siddhiAppRuntime = siddhiManager.createSiddhiAppRuntime(siddhiApp);
+        siddhiAppRuntime.addCallback("DeviceTempStream", queryCallback);
+
+        InputHandler inputHandler = siddhiAppRuntime.getInputHandler("TempStream");
+        siddhiAppRuntime.start();
+
+        inputHandler.send(new Object[]{1});
+        Thread.sleep(100);
+        inputHandler.send(new Object[]{1});
+        Thread.sleep(100);
+        inputHandler.send(new Object[]{1});
+        Thread.sleep(100);
+        inputHandler.send(new Object[]{2});
+        Thread.sleep(100);
+        inputHandler.send(new Object[]{2});
+
+        Thread.sleep(600);
+        //persisting
+        siddhiAppRuntime.persist();
+
+        inputHandler.send(new Object[]{2});
+        Thread.sleep(100);
+        inputHandler.send(new Object[]{2});
+
+        //restarting siddhi app
+        Thread.sleep(500);
+        siddhiAppRuntime.shutdown();
+        siddhiAppRuntime = siddhiManager.createSiddhiAppRuntime(siddhiApp);
+        siddhiAppRuntime.addCallback("DeviceTempStream", queryCallback);
+        inputHandler = siddhiAppRuntime.getInputHandler("TempStream");
+        siddhiAppRuntime.start();
+
+        //loading
+        try {
+            siddhiAppRuntime.restoreLastRevision();
+        } catch (CannotRestoreSiddhiAppStateException e) {
+            Assert.fail("Restoring of Siddhi app " + siddhiAppRuntime.getName() + " failed");
+        }
+
+        inputHandler.send(new Object[]{1});
+        Thread.sleep(10);
+        inputHandler.send(new Object[]{1});
+        Thread.sleep(10);
+        inputHandler.send(new Object[]{2});
+        Thread.sleep(10);
+        inputHandler.send(new Object[]{2});
+
+        //shutdown siddhi app
+        Thread.sleep(500);
+        siddhiAppRuntime.shutdown();
+
+        AssertJUnit.assertTrue(count == 11);
+        AssertJUnit.assertEquals(new Long(4), lastValue);
+        AssertJUnit.assertEquals(true, eventArrived);
+    }
+
+    @Test(dependsOnMethods = "persistenceTest12")
+    public void persistenceTest13() throws InterruptedException {
+        log.info("Persistence test 13 - partitioned sum with group-by on length windows.");
+        final int inputEventCount = 10;
+        PersistenceStore persistenceStore = new InMemoryPersistenceStore();
+        SiddhiManager siddhiManager = new SiddhiManager();
+        siddhiManager.setPersistenceStore(persistenceStore);
+
+        String siddhiApp = "@app:name('incrementalPersistenceTest10') "
+                + "define stream cseEventStreamOne (symbol string, price float,volume int);"
+                + "partition with (price>=100 as 'large' or price<100 as 'small' of cseEventStreamOne) " +
+                "begin " +
+                "@info(name = 'query1') " +
+                "from cseEventStreamOne#window.length(4) " +
+                "select symbol,sum(price) as price " +
+                "group by symbol " +
+                "insert into OutStockStream;  " +
+                "end ";
+
+
+        SiddhiAppRuntime siddhiAppRuntime = siddhiManager.createSiddhiAppRuntime(siddhiApp);
+        StreamCallback streamCallback = new StreamCallback() {
+            @Override
+            public void receive(Event[] events) {
+                EventPrinter.print(events);
+                eventArrived = true;
+                if (events != null) {
+                    for (Event event : events) {
+                        count++;
+                        lastValue = ((Double) event.getData(1)).longValue();
+                    }
+                }
+            }
+        };
+
+        siddhiAppRuntime.addCallback("OutStockStream", streamCallback);
+
+        InputHandler inputHandler = siddhiAppRuntime.getInputHandler("cseEventStreamOne");
+        siddhiAppRuntime.start();
+
+        for (int i = 0; i < inputEventCount; i++) {
+            inputHandler.send(new Object[]{"IBM", 95f + i, 100});
+            Thread.sleep(100);
+            siddhiAppRuntime.persist();
+        }
+
+        inputHandler.send(new Object[]{"IBM", 205f, 100});
+        Thread.sleep(100);
+
+        siddhiAppRuntime.shutdown();
+
+        siddhiAppRuntime = siddhiManager.createSiddhiAppRuntime(siddhiApp);
+
+        siddhiAppRuntime.addCallback("OutStockStream", streamCallback);
+
+        inputHandler = siddhiAppRuntime.getInputHandler("cseEventStreamOne");
+        siddhiAppRuntime.start();
+
+        Thread.sleep(1000);
+
+        //loading
+        try {
+            siddhiAppRuntime.restoreLastRevision();
+        } catch (CannotRestoreSiddhiAppStateException e) {
+            Assert.fail("Restoring of Siddhi app " + siddhiAppRuntime.getName() + " failed");
+        }
+
+        Thread.sleep(1000);
+
+        inputHandler.send(new Object[]{"IBM", 105f, 100});
+
+        Thread.sleep(1000);
+
+        AssertJUnit.assertEquals(new Long(414), lastValue);
+
+        siddhiAppRuntime.shutdown();
+    }
 }

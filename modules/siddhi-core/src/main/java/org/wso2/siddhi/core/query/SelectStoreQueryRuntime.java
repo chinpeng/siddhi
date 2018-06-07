@@ -24,6 +24,7 @@ import org.wso2.siddhi.core.exception.StoreQueryRuntimeException;
 import org.wso2.siddhi.core.query.processor.stream.window.QueryableProcessor;
 import org.wso2.siddhi.core.util.collection.operator.CompiledCondition;
 import org.wso2.siddhi.core.util.collection.operator.CompiledSelection;
+import org.wso2.siddhi.query.api.definition.Attribute;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,19 +32,21 @@ import java.util.List;
 /**
  * Store Query Runtime holds the runtime information needed for executing the store query.
  */
-public class SelectStoreQueryRuntime implements StoreQueryRuntime {
+public class SelectStoreQueryRuntime extends StoreQueryRuntime {
 
     private final CompiledSelection compiledSelection;
     private final CompiledCondition compiledCondition;
-    private final String queryName;
     private QueryableProcessor queryableProcessor;
 
     public SelectStoreQueryRuntime(QueryableProcessor queryableProcessor, CompiledCondition compiledCondition,
-                                   CompiledSelection compiledSelection, String queryName) {
+                                   CompiledSelection compiledSelection, List<Attribute> expectedOutputAttributeList,
+                                   String queryName) {
         this.queryableProcessor = queryableProcessor;
+
         this.compiledCondition = compiledCondition;
         this.compiledSelection = compiledSelection;
         this.queryName = queryName;
+        this.outputAttributes = expectedOutputAttributeList.toArray(new Attribute[expectedOutputAttributeList.size()]);
     }
 
     public Event[] execute() {
@@ -65,4 +68,13 @@ public class SelectStoreQueryRuntime implements StoreQueryRuntime {
         }
     }
 
+    @Override
+    public void reset() {
+
+    }
+
+    @Override
+    public TYPE getType() {
+        return TYPE.SELECT;
+    }
 }

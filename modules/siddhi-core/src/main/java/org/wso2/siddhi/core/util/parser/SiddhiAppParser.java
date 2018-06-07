@@ -29,7 +29,6 @@ import org.wso2.siddhi.core.util.ExceptionUtil;
 import org.wso2.siddhi.core.util.SiddhiAppRuntimeBuilder;
 import org.wso2.siddhi.core.util.SiddhiConstants;
 import org.wso2.siddhi.core.util.ThreadBarrier;
-import org.wso2.siddhi.core.util.persistence.PersistenceService;
 import org.wso2.siddhi.core.util.snapshot.SnapshotService;
 import org.wso2.siddhi.core.util.timestamp.EventTimeBasedMillisTimestampGenerator;
 import org.wso2.siddhi.core.util.timestamp.SystemCurrentTimeMillisTimestampGenerator;
@@ -142,6 +141,15 @@ public class SiddhiAppParser {
                     SiddhiConstants.ANNOTATION_ELEMENT_INCLUDE, siddhiApp.getAnnotations());
             siddhiAppContext.setIncludedMetrics(generateIncludedMetrics(statStateIncludElement));
 
+            Element transportCreationEnabledElement = AnnotationHelper.getAnnotationElement(
+                    SiddhiConstants.TRANSPORT_CHANNEL_CREATION_IDENTIFIER, null, siddhiApp.getAnnotations());
+            if (transportCreationEnabledElement == null) {
+                siddhiAppContext.setTransportChannelCreationEnabled(true);
+            } else {
+                siddhiAppContext.setTransportChannelCreationEnabled(
+                        Boolean.valueOf(transportCreationEnabledElement.getValue()));
+            }
+
 
             siddhiAppContext.setThreadBarrier(new ThreadBarrier());
 
@@ -203,7 +211,6 @@ public class SiddhiAppParser {
                 siddhiAppContext.setTimestampGenerator(new SystemCurrentTimeMillisTimestampGenerator());
             }
             siddhiAppContext.setSnapshotService(new SnapshotService(siddhiAppContext));
-            siddhiAppContext.setPersistenceService(new PersistenceService(siddhiAppContext));
             siddhiAppContext.setElementIdGenerator(new ElementIdGenerator(siddhiAppContext.getName()));
 
         } catch (DuplicateAnnotationException e) {
@@ -255,6 +262,7 @@ public class SiddhiAppParser {
                             (Partition) executionElement, siddhiAppContext,
                             siddhiAppRuntimeBuilder.getStreamDefinitionMap(), queryIndex);
                     siddhiAppRuntimeBuilder.addPartition(partitionRuntime);
+                    siddhiAppContext.getSnapshotService().addSnapshotable("partition", partitionRuntime);
                     queryIndex += ((Partition) executionElement).getQueryList().size();
                 } catch (Throwable t) {
                     ExceptionUtil.populateQueryContext(t, (Partition) executionElement, siddhiAppContext);

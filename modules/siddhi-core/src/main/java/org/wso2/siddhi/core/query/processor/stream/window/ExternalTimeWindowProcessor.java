@@ -28,6 +28,7 @@ import org.wso2.siddhi.core.event.ComplexEventChunk;
 import org.wso2.siddhi.core.event.state.StateEvent;
 import org.wso2.siddhi.core.event.stream.StreamEvent;
 import org.wso2.siddhi.core.event.stream.StreamEventCloner;
+import org.wso2.siddhi.core.event.stream.holder.SnapshotableStreamEventQueue;
 import org.wso2.siddhi.core.executor.ConstantExpressionExecutor;
 import org.wso2.siddhi.core.executor.ExpressionExecutor;
 import org.wso2.siddhi.core.executor.VariableExpressionExecutor;
@@ -38,6 +39,7 @@ import org.wso2.siddhi.core.util.collection.operator.MatchingMetaInfoHolder;
 import org.wso2.siddhi.core.util.collection.operator.Operator;
 import org.wso2.siddhi.core.util.config.ConfigReader;
 import org.wso2.siddhi.core.util.parser.OperatorParser;
+import org.wso2.siddhi.core.util.snapshot.state.SnapshotStateList;
 import org.wso2.siddhi.query.api.definition.Attribute;
 import org.wso2.siddhi.query.api.exception.SiddhiAppValidationException;
 import org.wso2.siddhi.query.api.expression.Expression;
@@ -56,16 +58,21 @@ import java.util.Map;
                 "windowTime period from the external timestamp, and gets updated on every monotonically " +
                 "increasing timestamp.",
         parameters = {
+                @Parameter(name = "timestamp",
+                        description = "The time which the window determines as current time and will act upon. " +
+                                "The value of this parameter should be monotonically increasing.",
+                        type = {DataType.LONG}),
+
                 @Parameter(name = "window.time",
                         description = "The sliding time period for which the window should hold events.",
                         type = {DataType.INT, DataType.LONG, DataType.TIME}),
         },
         examples = @Example(
                 syntax = "define window cseEventWindow (symbol string, price float, volume int) " +
-                        "externalTime(eventTime, 20 sec) output expired events;\n" +
+                        "externalTime(eventTime, 20 sec) output expired events;\n\n" +
                         "@info(name = 'query0')\n" +
                         "from cseEventStream\n" +
-                        "insert into cseEventWindow;\n" +
+                        "insert into cseEventWindow;\n\n" +
                         "@info(name = 'query1')\n" +
                         "from cseEventWindow\n" +
                         "select symbol, sum(price) as price\n" +
@@ -77,13 +84,13 @@ import java.util.Map;
 public class ExternalTimeWindowProcessor extends WindowProcessor implements FindableProcessor {
     private static final Logger log = Logger.getLogger(ExternalTimeWindowProcessor.class);
     private long timeToKeep;
-    private ComplexEventChunk<StreamEvent> expiredEventChunk;
+    private SnapshotableStreamEventQueue expiredEventQueue;
     private VariableExpressionExecutor timeStampVariableExpressionExecutor;
 
     @Override
     protected void init(ExpressionExecutor[] attributeExpressionExecutors, ConfigReader configReader, boolean
             outputExpectsExpiredEvents, SiddhiAppContext siddhiAppContext) {
-        this.expiredEventChunk = new ComplexEventChunk<StreamEvent>(false);
+        this.expiredEventQueue = new SnapshotableStreamEventQueue(streamEventClonerHolder);
         if (attributeExpressionExecutors.length == 2) {
             if (attributeExpressionExecutors[1].getReturnType() == Attribute.Type.INT) {
                 timeToKeep = Integer.parseInt(String.valueOf(((ConstantExpressionExecutor)
@@ -120,27 +127,27 @@ public class ExternalTimeWindowProcessor extends WindowProcessor implements Find
                 StreamEvent clonedEvent = streamEventCloner.copyStreamEvent(streamEvent);
                 clonedEvent.setType(StreamEvent.Type.EXPIRED);
 
-                // reset expiredEventChunk to make sure all of the expired events get removed,
+                // reset expiredEventQueue to make sure all of the expired events get removed,
                 // otherwise lastReturned.next will always return null and here while check is always false
-                expiredEventChunk.reset();
-                while (expiredEventChunk.hasNext()) {
-                    StreamEvent expiredEvent = expiredEventChunk.next();
+                expiredEventQueue.reset();
+                while (expiredEventQueue.hasNext()) {
+                    StreamEvent expiredEvent = expiredEventQueue.next();
                     long expiredEventTime = (Long) timeStampVariableExpressionExecutor.execute(expiredEvent);
                     long timeDiff = expiredEventTime - currentTime + timeToKeep;
                     if (timeDiff <= 0) {
-                        expiredEventChunk.remove();
+                        expiredEventQueue.remove();
                         expiredEvent.setTimestamp(currentTime);
                         streamEventChunk.insertBeforeCurrent(expiredEvent);
                     } else {
-                        expiredEventChunk.reset();
+                        expiredEventQueue.reset();
                         break;
                     }
                 }
 
                 if (streamEvent.getType() == StreamEvent.Type.CURRENT) {
-                    this.expiredEventChunk.add(clonedEvent);
+                    this.expiredEventQueue.add(clonedEvent);
                 }
-                expiredEventChunk.reset();
+                expiredEventQueue.reset();
             }
         }
         nextProcessor.process(streamEventChunk);
@@ -159,19 +166,19 @@ public class ExternalTimeWindowProcessor extends WindowProcessor implements Find
     @Override
     public Map<String, Object> currentState() {
         Map<String, Object> state = new HashMap<>();
-        state.put("ExpiredEventChunk", expiredEventChunk.getFirst());
+        state.put("ExpiredEventQueue", expiredEventQueue.getSnapshot());
         return state;
     }
 
     @Override
     public void restoreState(Map<String, Object> state) {
-        expiredEventChunk.clear();
-        expiredEventChunk.add((StreamEvent) state.get("ExpiredEventChunk"));
+        expiredEventQueue.clear();
+        expiredEventQueue.restore((SnapshotStateList) state.get("ExpiredEventQueue"));
     }
 
     @Override
     public synchronized StreamEvent find(StateEvent matchingEvent, CompiledCondition compiledCondition) {
-        return ((Operator) compiledCondition).find(matchingEvent, expiredEventChunk, streamEventCloner);
+        return ((Operator) compiledCondition).find(matchingEvent, expiredEventQueue, streamEventCloner);
     }
 
     @Override
@@ -179,7 +186,7 @@ public class ExternalTimeWindowProcessor extends WindowProcessor implements Find
                                                SiddhiAppContext siddhiAppContext,
                                                List<VariableExpressionExecutor> variableExpressionExecutors,
                                                Map<String, Table> tableMap, String queryName) {
-        return OperatorParser.constructOperator(expiredEventChunk, condition, matchingMetaInfoHolder,
+        return OperatorParser.constructOperator(expiredEventQueue, condition, matchingMetaInfoHolder,
                 siddhiAppContext, variableExpressionExecutors, tableMap, this.queryName);
     }
 }

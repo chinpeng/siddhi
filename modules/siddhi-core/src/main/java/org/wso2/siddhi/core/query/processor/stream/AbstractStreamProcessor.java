@@ -23,6 +23,7 @@ import org.wso2.siddhi.core.event.ComplexEventChunk;
 import org.wso2.siddhi.core.event.stream.MetaStreamEvent;
 import org.wso2.siddhi.core.event.stream.StreamEvent;
 import org.wso2.siddhi.core.event.stream.StreamEventCloner;
+import org.wso2.siddhi.core.event.stream.holder.StreamEventClonerHolder;
 import org.wso2.siddhi.core.event.stream.populater.ComplexEventPopulater;
 import org.wso2.siddhi.core.event.stream.populater.StreamEventPopulaterFactory;
 import org.wso2.siddhi.core.exception.SiddhiAppCreationException;
@@ -50,6 +51,7 @@ public abstract class AbstractStreamProcessor implements Processor, EternalRefer
     protected Processor nextProcessor;
 
     protected List<Attribute> additionalAttributes;
+    protected StreamEventClonerHolder streamEventClonerHolder = new StreamEventClonerHolder();
     protected StreamEventCloner streamEventCloner;
     protected AbstractDefinition inputDefinition;
     protected ExpressionExecutor[] attributeExpressionExecutors;
@@ -164,6 +166,13 @@ public abstract class AbstractStreamProcessor implements Processor, EternalRefer
             abstractStreamProcessor.complexEventPopulater = complexEventPopulater;
             abstractStreamProcessor.siddhiAppContext = siddhiAppContext;
             abstractStreamProcessor.elementId = elementId + "-" + key;
+            abstractStreamProcessor.configReader = configReader;
+            abstractStreamProcessor.outputExpectsExpiredEvents = outputExpectsExpiredEvents;
+            abstractStreamProcessor.queryName = queryName;
+            abstractStreamProcessor.siddhiAppContext.getSnapshotService().addSnapshotable(queryName,
+                    abstractStreamProcessor);
+            abstractStreamProcessor.siddhiAppContext.addEternalReferencedHolder(abstractStreamProcessor);
+
             abstractStreamProcessor.init(inputDefinition, attributeExpressionExecutors, configReader,
                     siddhiAppContext,
                     outputExpectsExpiredEvents);
@@ -185,6 +194,7 @@ public abstract class AbstractStreamProcessor implements Processor, EternalRefer
 
     public void setStreamEventCloner(StreamEventCloner streamEventCloner) {
         this.streamEventCloner = streamEventCloner;
+        this.streamEventClonerHolder.setStreamEventCloner(streamEventCloner);
     }
 
     public void setToLast(Processor processor) {

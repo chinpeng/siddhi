@@ -23,7 +23,6 @@ import org.wso2.siddhi.core.function.Script;
 import org.wso2.siddhi.core.util.ElementIdGenerator;
 import org.wso2.siddhi.core.util.ThreadBarrier;
 import org.wso2.siddhi.core.util.extension.holder.EternalReferencedHolder;
-import org.wso2.siddhi.core.util.persistence.PersistenceService;
 import org.wso2.siddhi.core.util.snapshot.SnapshotService;
 import org.wso2.siddhi.core.util.statistics.StatisticsManager;
 import org.wso2.siddhi.core.util.timestamp.TimestampGenerator;
@@ -56,13 +55,13 @@ public class SiddhiAppContext {
 
     private ThreadBarrier threadBarrier = null;
     private TimestampGenerator timestampGenerator = null;
-    private PersistenceService persistenceService;
     private ElementIdGenerator elementIdGenerator;
     private Map<String, Script> scriptFunctionMap;
     private ExceptionHandler<Object> disruptorExceptionHandler;
     private int bufferSize;
     private String siddhiAppString;
     private List<String> includedMetrics;
+    private boolean transportChannelCreationEnabled;
 
     public SiddhiAppContext() {
         this.eternalReferencedHolders = Collections.synchronizedList(new LinkedList<>());
@@ -165,14 +164,6 @@ public class SiddhiAppContext {
         this.snapshotService = snapshotService;
     }
 
-    public PersistenceService getPersistenceService() {
-        return persistenceService;
-    }
-
-    public void setPersistenceService(PersistenceService persistenceService) {
-        this.persistenceService = persistenceService;
-    }
-
     public ElementIdGenerator getElementIdGenerator() {
         return elementIdGenerator;
     }
@@ -227,5 +218,13 @@ public class SiddhiAppContext {
 
     public List<String> getIncludedMetrics() {
         return includedMetrics;
+    }
+
+    public boolean isTransportChannelCreationEnabled() {
+        return transportChannelCreationEnabled;
+    }
+
+    public void setTransportChannelCreationEnabled(boolean transportChannelCreationEnabled) {
+        this.transportChannelCreationEnabled = transportChannelCreationEnabled;
     }
 }

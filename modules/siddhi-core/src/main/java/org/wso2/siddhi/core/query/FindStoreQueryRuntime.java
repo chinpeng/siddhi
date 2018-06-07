@@ -22,11 +22,9 @@ import org.wso2.siddhi.core.event.ComplexEvent;
 import org.wso2.siddhi.core.event.ComplexEventChunk;
 import org.wso2.siddhi.core.event.Event;
 import org.wso2.siddhi.core.event.state.StateEvent;
-import org.wso2.siddhi.core.event.state.StateEventPool;
 import org.wso2.siddhi.core.event.stream.MetaStreamEvent;
 import org.wso2.siddhi.core.event.stream.StreamEvent;
 import org.wso2.siddhi.core.exception.StoreQueryRuntimeException;
-import org.wso2.siddhi.core.query.selector.QuerySelector;
 import org.wso2.siddhi.core.table.Table;
 import org.wso2.siddhi.core.util.collection.operator.CompiledCondition;
 import org.wso2.siddhi.core.window.Window;
@@ -37,39 +35,42 @@ import java.util.List;
 /**
  * Store Query Runtime holds the runtime information needed for executing the store query.
  */
-public class FindStoreQueryRuntime implements StoreQueryRuntime {
+public class FindStoreQueryRuntime extends StoreQueryRuntime {
 
     private CompiledCondition compiledCondition;
     private Table table;
     private Window window;
-    private String queryName;
     private MetaStreamEvent.EventType eventType;
-    private AggregationRuntime aggregation;
-    private QuerySelector selector;
-    private StateEventPool stateEventPool;
+    private AggregationRuntime aggregation;;
 
     public FindStoreQueryRuntime(Table table, CompiledCondition compiledCondition, String queryName,
-                                 MetaStreamEvent.EventType eventType) {
+                                 MetaStreamEvent metaStreamEvent) {
         this.table = table;
         this.compiledCondition = compiledCondition;
         this.queryName = queryName;
-        this.eventType = eventType;
+        this.eventType = metaStreamEvent.getEventType();
+        this.metaStreamEvent = metaStreamEvent;
+        this.setOutputAttributes(metaStreamEvent.getLastInputDefinition().getAttributeList());
     }
 
     public FindStoreQueryRuntime(Window window, CompiledCondition compiledCondition, String queryName,
-                                 MetaStreamEvent.EventType eventType) {
+                                 MetaStreamEvent metaStreamEvent) {
         this.window = window;
         this.compiledCondition = compiledCondition;
         this.queryName = queryName;
-        this.eventType = eventType;
+        this.eventType = metaStreamEvent.getEventType();
+        this.metaStreamEvent = metaStreamEvent;
+        this.setOutputAttributes(metaStreamEvent.getLastInputDefinition().getAttributeList());
     }
 
     public FindStoreQueryRuntime(AggregationRuntime aggregation, CompiledCondition compiledCondition, String queryName,
-                                 MetaStreamEvent.EventType eventType) {
+                                 MetaStreamEvent metaStreamEvent) {
         this.aggregation = aggregation;
         this.compiledCondition = compiledCondition;
         this.queryName = queryName;
-        this.eventType = eventType;
+        this.eventType = metaStreamEvent.getEventType();
+        this.metaStreamEvent = metaStreamEvent;
+        this.setOutputAttributes(metaStreamEvent.getLastInputDefinition().getAttributeList());
     }
 
     @Override
@@ -112,12 +113,34 @@ public class FindStoreQueryRuntime implements StoreQueryRuntime {
         }
     }
 
-    public void setStateEventPool(StateEventPool stateEventPool) {
-        this.stateEventPool = stateEventPool;
+    @Override
+    public void reset() {
+        if (selector != null) {
+            selector.process(generateResetComplexEventChunk(metaStreamEvent));
+        }
     }
 
-    public void setSelector(QuerySelector selector) {
-        this.selector = selector;
+    @Override
+    public TYPE getType() {
+        return TYPE.FIND;
+    }
+
+    private ComplexEventChunk<ComplexEvent> generateResetComplexEventChunk(MetaStreamEvent metaStreamEvent) {
+        StreamEvent streamEvent = new StreamEvent(metaStreamEvent.getBeforeWindowData().size(),
+                metaStreamEvent.getOnAfterWindowData().size(), metaStreamEvent.getOutputData().size());
+        streamEvent.setType(ComplexEvent.Type.RESET);
+
+        StateEvent stateEvent = stateEventPool.borrowEvent();
+        if (eventType == MetaStreamEvent.EventType.AGGREGATE) {
+            stateEvent.addEvent(1, streamEvent);
+        } else {
+            stateEvent.addEvent(0, streamEvent);
+        }
+        stateEvent.setType(ComplexEvent.Type.RESET);
+
+        ComplexEventChunk<ComplexEvent> complexEventChunk = new ComplexEventChunk<>(true);
+        complexEventChunk.add(stateEvent);
+        return complexEventChunk;
     }
 
     private Event[] executeSelector(StreamEvent streamEvents, MetaStreamEvent.EventType eventType) {
